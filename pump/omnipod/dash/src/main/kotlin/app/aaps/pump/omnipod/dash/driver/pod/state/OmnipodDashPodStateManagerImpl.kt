@@ -254,7 +254,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
 
     private fun updateAndLogBasalDrift() {
-        val actualBasalDelivered = (basalPulsesDelivered ?: 0) * 0.05
+        val actualBasalDelivered = (basalPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS
         
         // Initialize expected to match actual on first run
         if (podState.expectedBasalDelivered == null) {
