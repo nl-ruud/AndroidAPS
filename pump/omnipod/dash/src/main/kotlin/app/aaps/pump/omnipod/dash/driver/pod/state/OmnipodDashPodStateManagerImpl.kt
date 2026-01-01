@@ -277,8 +277,8 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         val expectedThisPeriod = currentRate * elapsedHours
         podState.expectedBasalDelivered = podState.expectedBasalDelivered!! + expectedThisPeriod
         
-        // Compute drift
-        val drift = podState.expectedBasalDelivered!! - actualBasalDelivered
+        // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
+        val drift = actualBasalDelivered - podState.expectedBasalDelivered!!
         
         // Log basal drift
         logger.info(
