@@ -253,13 +253,18 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             }
         }
 
-    private fun updateAndLogBasalDrift() {
-        val actualBasalDelivered = (basalPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS
-        
-        // Initialize expected to match actual on first run
-        if (podState.expectedBasalDelivered == null) {
-            podState.expectedBasalDelivered = actualBasalDelivered
-            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${String.format("%.3f", actualBasalDelivered)}U")
+    private val basalDelivered: Double
+        get() = (basalPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS
+
+    private val basalDrift: Double
+        // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
+        get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
+
+    private fun updateBasalExpected() {
+        // Initialize on first run
+        if (podState.basalExpected == null) {
+            podState.basalExpected = basalDelivered
+            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${String.format("%.3f", basalDelivered)}U")
             return
         }
         
@@ -275,18 +280,16 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         
         // Accumulate expected delivery
         val expectedThisPeriod = currentRate * elapsedHours
-        podState.expectedBasalDelivered = podState.expectedBasalDelivered!! + expectedThisPeriod
-        
-        // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
-        val drift = actualBasalDelivered - podState.expectedBasalDelivered!!
-        
-        // Log basal drift
+        podState.basalExpected = podState.basalExpected!! + expectedThisPeriod
+    }
+
+    private fun logBasalDrift() {
+        // Log basal drift (actual - expected: positive = over-delivery, negative = under-delivery)
         logger.info(
             LTag.PUMP,
-            "Basal Drift: Rate=${String.format("%.3f", currentRate)}U/h, " +
-            "Expected=${String.format("%.3f", podState.expectedBasalDelivered)}U, " +
-            "Actual=${String.format("%.3f", actualBasalDelivered)}U, " +
-            "Drift=${String.format("%.3f", drift)}U"
+            "Basal Drift: Expected=${String.format("%.3f", podState.basalExpected ?: basalDelivered)}U, " +
+            "Actual=${String.format("%.3f", basalDelivered)}U, " +
+            "Drift=${String.format("%.3f", basalDrift)}U"
         )
     }
 
@@ -670,8 +673,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
 
-        // Update drift tracking BEFORE updating lastUpdatedSystem
-        updateAndLogBasalDrift()
+        // Update expected basal BEFORE updating lastUpdatedSystem
+        updateBasalExpected()
+        logBasalDrift()
         
         podState.lastUpdatedSystem = System.currentTimeMillis()
         podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
@@ -851,6 +855,6 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         var lastBolus: OmnipodDashPodStateManager.LastBolus? = null,
 
         var bolusPulsesDelivered: Short? = null,  // Cumulative count of bolus pulses for basal tracking
-        var expectedBasalDelivered: Double? = null  // Initialized to actual on first drift calculation
+        var basalExpected: Double? = null  // Initialized to actual on first drift calculation
     ) : Serializable
 }
