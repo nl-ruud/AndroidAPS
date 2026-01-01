@@ -240,6 +240,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
 
     private var bolusPulsesDelivered: Short?
+        // Track pulses delivered via bolus for basal delivery detection
         get() = podState.bolusPulsesDelivered
         set(value) {
             podState.bolusPulsesDelivered = value
@@ -247,6 +248,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
 
     private val basalPulsesDelivered: Short?
+        // Compute basal pulses delivered by subtracting bolus pulses from total pulses delivered
         get() = pulsesDelivered?.let { total ->
             bolusPulsesDelivered?.let { bolus ->
                 (total - bolus).toShort()
@@ -254,6 +256,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
 
     private val basalDelivered: Double
+        // Compute basal delivered in insuline units
         get() = (basalPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS
 
     private val basalDrift: Double
