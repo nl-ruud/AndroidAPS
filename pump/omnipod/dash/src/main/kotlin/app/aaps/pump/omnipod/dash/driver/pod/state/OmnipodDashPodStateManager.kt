@@ -78,9 +78,6 @@ interface OmnipodDashPodStateManager {
     val activeAlerts: EnumSet<AlertType>?
     val alarmType: AlarmType?
 
-    var bolusPulsesDelivered: Short?  // Cumulative count of bolus pulses for basal tracking
-    val basalPulsesDelivered: Short?  // Computed: pulsesDelivered - bolusPulsesDelivered
-
     var tempBasal: TempBasal?
     val tempBasalActive: Boolean
     var basalProgram: BasalProgram?

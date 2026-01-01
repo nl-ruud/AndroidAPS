@@ -239,14 +239,14 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             store()
         }
 
-    override var bolusPulsesDelivered: Short?
+    private var bolusPulsesDelivered: Short?
         get() = podState.bolusPulsesDelivered
         set(value) {
             podState.bolusPulsesDelivered = value
             store()
         }
 
-    override val basalPulsesDelivered: Short?
+    private val basalPulsesDelivered: Short?
         get() = pulsesDelivered?.let { total ->
             bolusPulsesDelivered?.let { bolus ->
                 (total - bolus).toShort()
