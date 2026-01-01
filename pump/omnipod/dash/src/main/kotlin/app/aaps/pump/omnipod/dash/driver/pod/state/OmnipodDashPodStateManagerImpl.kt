@@ -287,8 +287,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             "Expected=${String.format("%.3f", podState.expectedBasalDelivered)}U, " +
             "Actual=${String.format("%.3f", actualBasalDelivered)}U, " +
             "Drift=${String.format("%.3f", drift)}U"
-            )
-        }
+        )
     }
 
     override val lastStatusResponseReceived: Long
