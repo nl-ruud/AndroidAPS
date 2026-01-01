@@ -78,6 +78,9 @@ interface OmnipodDashPodStateManager {
     val activeAlerts: EnumSet<AlertType>?
     val alarmType: AlarmType?
 
+    var bolusPulsesDelivered: Short?  // Cumulative count of bolus pulses for basal tracking
+    val basalPulsesDelivered: Short?  // Computed: pulsesDelivered - bolusPulsesDelivered
+
     var tempBasal: TempBasal?
     val tempBasalActive: Boolean
     var basalProgram: BasalProgram?
@@ -158,7 +161,8 @@ interface OmnipodDashPodStateManager {
         var bolusUnitsRemaining: Double,
         var deliveryComplete: Boolean,
         val historyId: Long,
-        val bolusType: BS.Type
+        val bolusType: BS.Type,
+        var startingPulses: Short? = null  // Pod's pulsesDelivered at bolus start, for accurate pulse tracking
     ) {
 
         fun deliveredUnits(): Double? {
