@@ -283,6 +283,11 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         
         // Accumulate expected delivery
         val expectedThisPeriod = currentRate * elapsedHours
+        logger.info(
+            LTag.PUMP,
+            "Expected basal calculation: rate=${String.format("%.3f", currentRate)}U/hr × " +
+            "${String.format("%.2f", elapsedHours * 60)}min = ${String.format("%.3f", expectedThisPeriod)}U"
+        )
         podState.basalExpected = podState.basalExpected!! + expectedThisPeriod
     }
 
