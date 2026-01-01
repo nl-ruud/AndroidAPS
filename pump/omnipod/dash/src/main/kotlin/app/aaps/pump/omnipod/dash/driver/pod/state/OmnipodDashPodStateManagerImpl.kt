@@ -256,7 +256,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
 
     private val basalDelivered: Double
-        // Compute basal delivered in insuline units
+        // Compute basal delivered in insulin units
         get() = (basalPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS
 
     private val basalDrift: Double
@@ -264,40 +264,46 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
     private fun updateBasalExpected() {
-        // Initialize on first run
-        if (podState.basalExpected == null) {
-            podState.basalExpected = basalDelivered
-            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${String.format("%.3f", basalDelivered)}U")
-            return
+        podState.basalExpected = podState.basalExpected?.let { 
+            // Calculate time elapsed since last update
+            val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
+            
+            // Determine current basal rate
+            val currentRate = when {
+                isSuspended -> 0.0
+                tempBasalActive -> tempBasal?.rate ?: 0.0
+                else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
+            }
+            
+            // Accumulate expected delivery
+            val expectedThisPeriod = currentRate * elapsedHours
+
+            // Log expected delivery calculation
+            logger.info(
+                LTag.PUMP,
+                "Expected basal calculation: rate=${"%.3f".format(currentRate)}U/hr × " +
+                "${"%.2f".format(elapsedHours * 60)}min = ${"%.3f".format(expectedThisPeriod)}U"
+            )
+
+            // Return updated value
+            it + expectedThisPeriod
+        } ?: run {
+            // Initial setup for first run
+            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
+            basalDelivered
         }
-        
-        // Calculate time elapsed since last update
-        val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
-        
-        // Determine current basal rate
-        val currentRate = when {
-            isSuspended -> 0.0
-            tempBasalActive -> tempBasal?.rate ?: 0.0
-            else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
-        }
-        
-        // Accumulate expected delivery
-        val expectedThisPeriod = currentRate * elapsedHours
-        logger.info(
-            LTag.PUMP,
-            "Expected basal calculation: rate=${String.format("%.3f", currentRate)}U/hr × " +
-            "${String.format("%.2f", elapsedHours * 60)}min = ${String.format("%.3f", expectedThisPeriod)}U"
-        )
-        podState.basalExpected = podState.basalExpected!! + expectedThisPeriod
     }
 
     private fun logBasalDrift() {
         // Log basal drift (actual - expected: positive = over-delivery, negative = under-delivery)
         logger.info(
             LTag.PUMP,
-            "Basal Drift: Expected=${String.format("%.3f", podState.basalExpected ?: basalDelivered)}U, " +
-            "Actual=${String.format("%.3f", basalDelivered)}U, " +
-            "Drift=${String.format("%.3f", basalDrift)}U"
+            """
+            Basal Drift:
+              Expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
+              Actual   = ${"%.3f".format(basalDelivered)}U
+              Error    = ${"%.3f".format(basalDrift)}U
+            """.trimIndent()
         )
     }
 
@@ -419,11 +425,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
                 val deliveredPulses = (endPulses - startPulses).toShort()
                 
                 // Initialize counter on first bolus if not set (resets to current total for clean slate after upgrade/activation)
-                if (podState.bolusPulsesDelivered == null) {
-                    podState.bolusPulsesDelivered = podState.pulsesDelivered
-                } else {
-                    podState.bolusPulsesDelivered = (podState.bolusPulsesDelivered!! + deliveredPulses).toShort()
-                }
+                podState.bolusPulsesDelivered =
+                    podState.bolusPulsesDelivered?.let { (it + deliveredPulses).toShort() }
+                        ?: podState.pulsesDelivered
             } else {
                 logger.warn(LTag.PUMP, "Cannot track bolus pulses: startingPulses=$startPulses, pulsesDelivered=$endPulses")
             }
