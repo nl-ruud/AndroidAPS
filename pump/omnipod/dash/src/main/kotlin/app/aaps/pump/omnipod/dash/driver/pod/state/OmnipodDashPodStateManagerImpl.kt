@@ -264,6 +264,13 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
     private fun updateBasalExpected() {
+         // Guard against uninitialized state
+        if (podState.lastUpdatedSystem == 0L) {
+            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
+            podState.basalExpected = basalDelivered
+            return
+        }
+
         podState.basalExpected = podState.basalExpected?.let { 
             // Calculate time elapsed since last update
             val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
@@ -300,9 +307,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             LTag.PUMP,
             """
             Basal Drift:
-              Expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
-              Actual   = ${"%.3f".format(basalDelivered)}U
-              Error    = ${"%.3f".format(basalDrift)}U
+              actual   = ${"%.3f".format(basalDelivered)}U
+              expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
+              error    = ${"%.3f".format(basalDrift)}U
             """.trimIndent()
         )
     }
