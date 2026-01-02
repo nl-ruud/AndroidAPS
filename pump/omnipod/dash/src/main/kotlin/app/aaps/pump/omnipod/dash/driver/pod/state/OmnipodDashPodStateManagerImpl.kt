@@ -263,6 +263,26 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
+    private fun trackBolusPulses(totalPulsesDelivered: Short) {
+        // Initialize baseline snapshot on first tracking
+        if (podState.bolusPulsesDelivered == null) {
+            podState.bolusPulsesDelivered = totalPulsesDelivered
+        }
+        
+        // Skip tracking if no previous pulse data available
+        val previousTotalPulses = podState.pulsesDelivered ?: return
+        
+        // Track pulse increment for bolus delivery detection
+        val pulseIncrement = totalPulsesDelivered - previousTotalPulses
+        
+        // If bolus is active, attribute all new pulses to bolus (pod queues deliveries)
+        if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
+            podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { 
+                (it + pulseIncrement).toShort() 
+            }
+        }
+    }
+
     private fun updateBasalExpected() {
         // Guard against uninitialized state
         if (podState.lastUpdatedSystem == 0L) {
@@ -667,16 +687,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     override fun updateFromDefaultStatusResponse(response: DefaultStatusResponse) {
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
         
-        // Track pulse increment for bolus delivery detection
-        val previousTotalPulses = podState.pulsesDelivered ?: 0
-        val pulseIncrement = response.totalPulsesDelivered - previousTotalPulses
-        
-        // If bolus is active, attribute all new pulses to bolus (pod queues deliveries)
-        if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
-            podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { 
-                (it + pulseIncrement).toShort() 
-            } ?: response.totalPulsesDelivered  // Initialize on first bolus
-        }
+        trackBolusPulses(response.totalPulsesDelivered)
         
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
