@@ -264,7 +264,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
     private fun updateBasalExpected() {
-         // Guard against uninitialized state
+        // Guard against uninitialized state
         if (podState.lastUpdatedSystem == 0L) {
             logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
             podState.basalExpected = basalDelivered
@@ -412,8 +412,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             bolusUnitsRemaining = requestedUnits,
             deliveryComplete = false, // cancelled, delivered 100% or pod failure
             historyId = historyId,
-            bolusType = bolusType,
-            startingPulses = podState.pulsesDelivered  // Capture current pulse count
+            bolusType = bolusType
         )
     }
 
@@ -423,21 +422,6 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
 
         lastBolus?.run {
             this.deliveryComplete = true
-            
-            // Track bolus pulses for basal delivery detection using actual pod pulse counts
-            val startPulses = this.startingPulses
-            val endPulses = podState.pulsesDelivered
-            
-            if (startPulses != null && endPulses != null) {
-                val deliveredPulses = (endPulses - startPulses).toShort()
-                
-                // Initialize counter on first bolus if not set (resets to current total for clean slate after upgrade/activation)
-                podState.bolusPulsesDelivered =
-                    podState.bolusPulsesDelivered?.let { (it + deliveredPulses).toShort() }
-                        ?: podState.pulsesDelivered
-            } else {
-                logger.warn(LTag.PUMP, "Cannot track bolus pulses: startingPulses=$startPulses, pulsesDelivered=$endPulses")
-            }
         }
             ?: logger.error(LTag.PUMP, "Trying to mark null bolus as complete")
 
@@ -682,6 +666,18 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
 
     override fun updateFromDefaultStatusResponse(response: DefaultStatusResponse) {
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
+        
+        // Track pulse increment for bolus delivery detection
+        val previousTotalPulses = podState.pulsesDelivered ?: 0
+        val pulseIncrement = response.totalPulsesDelivered - previousTotalPulses
+        
+        // If bolus is active, attribute all new pulses to bolus (pod queues deliveries)
+        if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
+            podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { 
+                (it + pulseIncrement).toShort() 
+            } ?: response.totalPulsesDelivered  // Initialize on first bolus
+        }
+        
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
         podState.pulsesDelivered = response.totalPulsesDelivered

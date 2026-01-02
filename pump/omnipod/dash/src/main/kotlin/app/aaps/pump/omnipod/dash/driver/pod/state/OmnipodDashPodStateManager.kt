@@ -158,8 +158,7 @@ interface OmnipodDashPodStateManager {
         var bolusUnitsRemaining: Double,
         var deliveryComplete: Boolean,
         val historyId: Long,
-        val bolusType: BS.Type,
-        var startingPulses: Short? = null  // Pod's pulsesDelivered at bolus start, for accurate pulse tracking
+        val bolusType: BS.Type
     ) {
 
         fun deliveredUnits(): Double? {
