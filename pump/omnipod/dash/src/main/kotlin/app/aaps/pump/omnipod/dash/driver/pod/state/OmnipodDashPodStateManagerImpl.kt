@@ -263,52 +263,29 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
-    private fun updateBasalExpected(actualDeliveryThisPeriod: Double) {
-        // Guard against uninitialized state
-        if (podState.lastUpdatedSystem == 0L) {
-            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
-            podState.basalExpected = basalDelivered
-            return
-        }
-        
-        // Calculate time elapsed since last update
-        val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
-        
-        // Determine current basal rate
-        val currentRate = when {
-            isSuspended -> 0.0
-            tempBasalActive -> tempBasal?.rate ?: 0.0
-            else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
-        }
-        
-        // Calculate expected delivery for this period
-        // This is an approximation as we cannot just get it from iob
-        val expectedThisPeriod = currentRate * elapsedHours
-        
-        podState.basalExpected = podState.basalExpected?.let {
-            // Safety check: skip unreliable calculations
-            val discrepancy = actualDeliveryThisPeriod - expectedThisPeriod
-            if (discrepancy < -0.1 || discrepancy > 0.1) {
-                logger.warn(
-                    LTag.PUMP,
-                    """
-                    Basal period SKIPPED - unreliable calculation:
-                      actual       = ${"%.3f".format(actualDeliveryThisPeriod)}U
-                      expected     = ${"%.3f".format(expectedThisPeriod)}U
-                        basal rate = ${"%.3f".format(currentRate)}U/hr
-                        elapsed    = ${"%.2f".format(elapsedHours * 60)}min 
-                      drift        = ${"%.3f".format(discrepancy)}U
-                    """.trimIndent()
-                )
-                return@let it + actualDeliveryThisPeriod  // Track actual delivery to maintain accurate drift
+    private fun updateBasalExpected() {
+        podState.basalExpected = podState.basalExpected?.let { 
+            // Calculate time elapsed since last update
+            val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
+            
+            // Determine current basal rate
+            val currentRate = when {
+                isSuspended -> 0.0
+                tempBasalActive -> tempBasal?.rate ?: 0.0
+                else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
             }
             
-            // Normal case: log and accumulate expected delivery
+            // Accumulate expected delivery
+            val expectedThisPeriod = currentRate * elapsedHours
+
+            // Log expected delivery calculation
             logger.info(
                 LTag.PUMP,
                 "Expected basal calculation: rate=${"%.3f".format(currentRate)}U/hr × " +
                 "${"%.2f".format(elapsedHours * 60)}min = ${"%.3f".format(expectedThisPeriod)}U"
             )
+
+            // Return updated value
             it + expectedThisPeriod
         } ?: run {
             // Initial setup for first run
@@ -323,9 +300,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             LTag.PUMP,
             """
             Basal Drift:
-              actual   = ${"%.3f".format(basalDelivered)}U
-              expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
-              error    = ${"%.3f".format(basalDrift)}U
+              Expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
+              Actual   = ${"%.3f".format(basalDelivered)}U
+              Error    = ${"%.3f".format(basalDrift)}U
             """.trimIndent()
         )
     }
@@ -700,10 +677,6 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
-        
-        // Capture basal delivered before updating pulses
-        val previousBasalDelivered = basalDelivered
-        
         podState.pulsesDelivered = response.totalPulsesDelivered
         if (response.reservoirPulsesRemaining < 1023) {
             podState.pulsesRemaining = response.reservoirPulsesRemaining
@@ -712,11 +685,8 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
 
-        // Calculate actual delivery change this period
-        val actualDeliveryThisPeriod = basalDelivered - previousBasalDelivered
-        
         // Update expected basal BEFORE updating lastUpdatedSystem
-        updateBasalExpected(actualDeliveryThisPeriod)
+        updateBasalExpected()
         logBasalDrift()
         
         podState.lastUpdatedSystem = System.currentTimeMillis()
