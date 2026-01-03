@@ -263,26 +263,6 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
-    private fun calculateBolusPulsesDelivered(
-        totalPulsesDelivered: Short,
-        previousTotalPulses: Short?,
-        currentBolusPulsesDelivered: Short?
-    ): Short? {
-        // Initialize baseline snapshot on first tracking or skip if no previous pulse data available
-        val current = currentBolusPulsesDelivered ?: return totalPulsesDelivered
-        val previous = previousTotalPulses ?: return current
-        
-        // Track pulse increment for bolus delivery detection
-        val pulseIncrement = totalPulsesDelivered - previous
-        
-        // If bolus is active, attribute all new pulses to bolus (pod queues deliveries)
-        return if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
-            (current + pulseIncrement).toShort()
-        } else {
-            current
-        }
-    }
-
     private fun integrateExpectedDelivery(startTime: Long, endTime: Long): Double {
         logger.debug(LTag.PUMP, "integrateExpectedDelivery: period ${(endTime - startTime) / 1000.0}s")
         
@@ -711,11 +691,11 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.basalExpected = podState.basalExpected?.let { 
             it + integrateExpectedDelivery(podState.lastUpdatedSystem, System.currentTimeMillis())
         } ?: basalDelivered
-        podState.bolusPulsesDelivered = calculateBolusPulsesDelivered(
-            response.totalPulsesDelivered,
-            podState.pulsesDelivered,
-            podState.bolusPulsesDelivered
-        )
+        podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
+            podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
+                (current + response.totalPulsesDelivered - prev).toShort()
+            } ?: current
+        } ?: response.totalPulsesDelivered
         podState.pulsesDelivered = response.totalPulsesDelivered
         if (response.reservoirPulsesRemaining < 1023) {
             podState.pulsesRemaining = response.reservoirPulsesRemaining
