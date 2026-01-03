@@ -307,14 +307,14 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
 
             total += rate * segmentHours
             
-            logger.info(
+            logger.debug(
                 LTag.PUMP,
                 "  segment ${i + 1}/${boundaries.size - 1}: " +
                 "${segmentHours * 3600}s @ ${rate}U/h = ${"%.4f".format(rate * segmentHours)}U"
             )
         }
         
-        logger.info(LTag.PUMP, "  total integrated delivery: ${"%.4f".format(total)}U")
+        logger.debug(LTag.PUMP, "  total integrated delivery: ${"%.4f".format(total)}U")
         return total
     }
 
@@ -685,11 +685,14 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     }
 
     override fun updateFromDefaultStatusResponse(response: DefaultStatusResponse) {
+        val now = System.currentTimeMillis()
+        val nowRealtime = SystemClock.elapsedRealtime()
+        
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
         podState.basalExpected = podState.basalExpected?.let { 
-            it + integrateExpectedDelivery(podState.lastUpdatedSystem, System.currentTimeMillis())
+            it + integrateExpectedDelivery(podState.lastUpdatedSystem, now)
         } ?: basalDelivered
         podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
             podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
@@ -704,11 +707,11 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
 
-        podState.lastUpdatedSystem = System.currentTimeMillis()
-        podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
+        podState.lastUpdatedSystem = now
+        podState.lastStatusResponseReceived = nowRealtime
         updateLastBolusFromResponse(response.bolusPulsesRemaining)
         if (podState.activationTime == null) {
-            podState.activationTime = System.currentTimeMillis() - (response.minutesSinceActivation * 60_000)
+            podState.activationTime = now - (response.minutesSinceActivation * 60_000)
         }
 
         logBasalDrift()
@@ -764,12 +767,23 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     }
 
     override fun updateFromAlarmStatusResponse(response: AlarmStatusResponse) {
+        val now = System.currentTimeMillis()
+        val nowRealtime = SystemClock.elapsedRealtime()
+        
         logger.info(
             LTag.PUMPCOMM,
             "Received AlarmStatusResponse: $response"
         )
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
+        podState.basalExpected = podState.basalExpected?.let { 
+            it + integrateExpectedDelivery(podState.lastUpdatedSystem, now)
+        } ?: basalDelivered
+        podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
+            podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
+                (current + response.totalPulsesDelivered - prev).toShort()
+            } ?: current
+        } ?: response.totalPulsesDelivered
         podState.pulsesDelivered = response.totalPulsesDelivered
 
         if (response.reservoirPulsesRemaining < 1023) {
@@ -780,8 +794,8 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.activeAlerts = response.activeAlerts
         podState.alarmType = response.alarmType
 
-        podState.lastUpdatedSystem = System.currentTimeMillis()
-        podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
+        podState.lastUpdatedSystem = now
+        podState.lastStatusResponseReceived = nowRealtime
         updateLastBolusFromResponse(response.bolusPulsesRemaining)
 
         store()
