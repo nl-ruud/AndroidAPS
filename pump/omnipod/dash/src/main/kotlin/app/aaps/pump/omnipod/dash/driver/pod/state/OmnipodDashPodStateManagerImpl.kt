@@ -708,6 +708,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
+        podState.basalExpected = podState.basalExpected?.let { 
+            it + integrateExpectedDelivery(podState.lastUpdatedSystem, System.currentTimeMillis())
+        } ?: basalDelivered
         podState.bolusPulsesDelivered = calculateBolusPulsesDelivered(
             response.totalPulsesDelivered,
             podState.pulsesDelivered,
@@ -721,10 +724,6 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
 
-        podState.basalExpected = podState.basalExpected?.let { 
-            it + integrateExpectedDelivery(podState.lastUpdatedSystem, System.currentTimeMillis())
-        } ?: basalDelivered
-        
         podState.lastUpdatedSystem = System.currentTimeMillis()
         podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
         updateLastBolusFromResponse(response.bolusPulsesRemaining)
