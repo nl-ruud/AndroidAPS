@@ -263,62 +263,58 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
 
-    private fun trackBolusPulses(totalPulsesDelivered: Short) {
-        // Initialize baseline snapshot on first tracking
-        if (podState.bolusPulsesDelivered == null) {
-            podState.bolusPulsesDelivered = totalPulsesDelivered
-        }
-        
-        // Skip tracking if no previous pulse data available
-        val previousTotalPulses = podState.pulsesDelivered ?: return
+    private fun calculateBolusPulsesDelivered(
+        totalPulsesDelivered: Short,
+        previousTotalPulses: Short?,
+        currentBolusPulsesDelivered: Short?
+    ): Short? {
+        // Initialize baseline snapshot on first tracking or skip if no previous pulse data available
+        val current = currentBolusPulsesDelivered ?: return totalPulsesDelivered
+        val previous = previousTotalPulses ?: return current
         
         // Track pulse increment for bolus delivery detection
-        val pulseIncrement = totalPulsesDelivered - previousTotalPulses
+        val pulseIncrement = totalPulsesDelivered - previous
         
         // If bolus is active, attribute all new pulses to bolus (pod queues deliveries)
-        if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
-            podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { 
-                (it + pulseIncrement).toShort() 
-            }
+        return if (podState.lastBolus?.deliveryComplete == false && pulseIncrement > 0) {
+            (current + pulseIncrement).toShort()
+        } else {
+            current
         }
     }
 
-    private fun updateBasalExpected() {
-        // Guard against uninitialized state
-        if (podState.lastUpdatedSystem == 0L) {
+    private fun calculateBasalExpected(
+        lastUpdatedSystem: Long,
+        currentBasalExpected: Double?,
+        basalDelivered: Double
+    ): Double {
+        // Initialize on first run or uninitialized state
+        if (lastUpdatedSystem == 0L || currentBasalExpected == null) {
             logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
-            podState.basalExpected = basalDelivered
-            return
+            return basalDelivered
         }
 
-        podState.basalExpected = podState.basalExpected?.let { 
-            // Calculate time elapsed since last update
-            val elapsedHours = (System.currentTimeMillis() - podState.lastUpdatedSystem) / 3600000.0
-            
-            // Determine current basal rate
-            val currentRate = when {
-                isSuspended -> 0.0
-                tempBasalActive -> tempBasal?.rate ?: 0.0
-                else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
-            }
-            
-            // Accumulate expected delivery
-            val expectedThisPeriod = currentRate * elapsedHours
-
-            // Log expected delivery calculation
-            logger.info(
-                LTag.PUMP,
-                "Expected basal calculation: rate=${"%.3f".format(currentRate)}U/hr × " +
-                "${"%.2f".format(elapsedHours * 60)}min = ${"%.3f".format(expectedThisPeriod)}U"
-            )
-
-            // Return updated value
-            it + expectedThisPeriod
-        } ?: run {
-            // Initial setup for first run
-            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
-            basalDelivered
+        // Calculate time elapsed since last update
+        val elapsedHours = (System.currentTimeMillis() - lastUpdatedSystem) / 3600000.0
+        
+        // Determine current basal rate
+        val currentRate = when {
+            isSuspended -> 0.0
+            tempBasalActive -> tempBasal?.rate ?: 0.0
+            else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
         }
+        
+        // Accumulate expected delivery
+        val expectedThisPeriod = currentRate * elapsedHours
+
+        // Log expected delivery calculation
+        logger.info(
+            LTag.PUMP,
+            "Expected basal calculation: rate=${"%.3f".format(currentRate)}U/hr × " +
+            "${"%.2f".format(elapsedHours * 60)}min = ${"%.3f".format(expectedThisPeriod)}U"
+        )
+
+        return currentBasalExpected + expectedThisPeriod
     }
 
     private fun logBasalDrift() {
@@ -328,6 +324,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             """
             Basal Drift:
               actual   = ${"%.3f".format(basalDelivered)}U
+                total delivered = ${"%.3f".format((pulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS)}U
+                bolus deliverd = ${"%.3f".format((bolusPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS)}U
+                basal delivered= ${"%.3f".format(basalDelivered)}U
               expected = ${"%.3f".format(podState.basalExpected ?: basalDelivered)}U
               error    = ${"%.3f".format(basalDrift)}U
             """.trimIndent()
@@ -686,11 +685,13 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
 
     override fun updateFromDefaultStatusResponse(response: DefaultStatusResponse) {
         logger.debug(LTag.PUMPCOMM, "Default status response :$response")
-        
-        trackBolusPulses(response.totalPulsesDelivered)
-        
         podState.deliveryStatus = response.deliveryStatus
         podState.podStatus = response.podStatus
+        podState.bolusPulsesDelivered = calculateBolusPulsesDelivered(
+            response.totalPulsesDelivered,
+            podState.pulsesDelivered,
+            podState.bolusPulsesDelivered
+        )
         podState.pulsesDelivered = response.totalPulsesDelivered
         if (response.reservoirPulsesRemaining < 1023) {
             podState.pulsesRemaining = response.reservoirPulsesRemaining
@@ -698,11 +699,11 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.sequenceNumberOfLastProgrammingCommand = response.sequenceNumberOfLastProgrammingCommand
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
-
-        // Update expected basal BEFORE updating lastUpdatedSystem
-        updateBasalExpected()
-        logBasalDrift()
-        
+        podState.basalExpected = calculateBasalExpected(
+            podState.lastUpdatedSystem,
+            podState.basalExpected,
+            basalDelivered
+        )
         podState.lastUpdatedSystem = System.currentTimeMillis()
         podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
         updateLastBolusFromResponse(response.bolusPulsesRemaining)
@@ -710,6 +711,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             podState.activationTime = System.currentTimeMillis() - (response.minutesSinceActivation * 60_000)
         }
 
+        logBasalDrift()
         store()
         rxBus.send(EventOmnipodDashPumpValuesChanged())
     }
