@@ -283,38 +283,59 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         }
     }
 
-    private fun calculateBasalExpected(
-        lastUpdatedSystem: Long,
-        currentBasalExpected: Double?,
-        basalDelivered: Double
-    ): Double {
-        // Initialize on first run or uninitialized state
-        if (lastUpdatedSystem == 0L || currentBasalExpected == null) {
-            logger.info(LTag.PUMP, "Basal drift tracking initialized at ${"%.3f".format(basalDelivered)}U")
-            return basalDelivered
-        }
-
-        // Calculate time elapsed since last update
-        val elapsedHours = (System.currentTimeMillis() - lastUpdatedSystem) / 3600000.0
+    private fun integrateExpectedDelivery(startTime: Long, endTime: Long): Double {
+        logger.debug(LTag.PUMP, "integrateExpectedDelivery: period ${(endTime - startTime) / 1000.0}s")
         
-        // Determine current basal rate
-        val currentRate = when {
-            isSuspended -> 0.0
-            tempBasalActive -> tempBasal?.rate ?: 0.0
-            else -> basalProgram?.rateAt(System.currentTimeMillis()) ?: 0.0
+        // Build list of time boundaries where rate changes
+        val boundaries = mutableListOf(startTime)
+        
+        // Add temp basal start/end if in period
+        tempBasal?.let { tb ->
+            val tempStart = tb.startTime
+            val tempEnd = tb.startTime + tb.durationInMinutes * 60_000L
+            if (tempStart in (startTime + 1) until endTime) boundaries.add(tempStart)
+            if (tempEnd in (startTime + 1) until endTime) boundaries.add(tempEnd)
         }
         
-        // Accumulate expected delivery
-        val expectedThisPeriod = currentRate * elapsedHours
+        // Add hour boundaries for basal program transitions
+        var nextHour = (startTime / 3600_000L + 1) * 3600_000L  // Next whole hour
+        while (nextHour < endTime) {
+            boundaries.add(nextHour)
+            nextHour += 3600_000L
+        }
+        
+        boundaries.add(endTime)
+        boundaries.sort()
+        
+        // Integrate over each segment
+        var total = 0.0
+        for (i in 0 until boundaries.size - 1) {
+            val segmentStart = boundaries[i]
+            val segmentEnd = boundaries[i + 1]
+            val segmentHours = (segmentEnd - segmentStart) / 3600_000.0
+            
+            // Determine rate at segment midpoint
+            val segmentMid = (segmentStart + segmentEnd) / 2
+            val rate = when {
+                isSuspended -> 0.0
+                tempBasal?.let { 
+                    segmentMid >= it.startTime && 
+                    segmentMid < it.startTime + it.durationInMinutes * 60_000L 
+                } == true -> tempBasal?.rate ?: 0.0
+                else -> basalProgram?.rateAt(segmentMid) ?: 0.0
+            }
 
-        // Log expected delivery calculation
-        logger.info(
-            LTag.PUMP,
-            "Expected basal calculation: rate=${"%.3f".format(currentRate)}U/hr × " +
-            "${"%.2f".format(elapsedHours * 60)}min = ${"%.3f".format(expectedThisPeriod)}U"
-        )
-
-        return currentBasalExpected + expectedThisPeriod
+            total += rate * segmentHours
+            
+            logger.info(
+                LTag.PUMP,
+                "  segment ${i + 1}/${boundaries.size - 1}: " +
+                "${segmentHours * 3600}s @ ${rate}U/h = ${"%.4f".format(rate * segmentHours)}U"
+            )
+        }
+        
+        logger.info(LTag.PUMP, "  total integrated delivery: ${"%.4f".format(total)}U")
+        return total
     }
 
     private fun logBasalDrift() {
@@ -699,11 +720,11 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         podState.sequenceNumberOfLastProgrammingCommand = response.sequenceNumberOfLastProgrammingCommand
         podState.minutesSinceActivation = response.minutesSinceActivation
         podState.activeAlerts = response.activeAlerts
-        podState.basalExpected = calculateBasalExpected(
-            podState.lastUpdatedSystem,
-            podState.basalExpected,
-            basalDelivered
-        )
+
+        podState.basalExpected = podState.basalExpected?.let { 
+            it + integrateExpectedDelivery(podState.lastUpdatedSystem, System.currentTimeMillis())
+        } ?: basalDelivered
+        
         podState.lastUpdatedSystem = System.currentTimeMillis()
         podState.lastStatusResponseReceived = SystemClock.elapsedRealtime()
         updateLastBolusFromResponse(response.bolusPulsesRemaining)
