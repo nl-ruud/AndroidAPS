@@ -9,7 +9,6 @@
 /java_pid*
 *.apk
 build/
-bin/
 !.idea/dictionaries/project-dictionary.xml
 .idea/*
 !.idea/codeStyles/
@@ -34,4 +33,3 @@ wear/pumpcontrol/*
 /buildSrc/.kotlin
 .claude/settings.local.json
 /CLAUDE.md
-.vscode/
