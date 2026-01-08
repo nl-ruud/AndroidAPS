@@ -706,13 +706,13 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         if (isActivationCompleted) {
             logger.info(
                 LTag.PUMP,
-                "PUMP_BASAL err=%+.2fU dErr=%+.2fU act=%.2fU (tot=%.2fU bol=%.2fU) exp=%.2fU".format(
-                    basalDrift,
-                    basalDrift - driftBefore,
+                "PUMP_BASAL act=%.2fU (tot=%.2fU bol=%.2fU) exp=%.2fU err=%+.2fU dErr=%+.2fU".format(
                     basalDelivered,
                     (pulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS,
                     (bolusPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS,
-                    podState.basalExpected ?: 0.0
+                    podState.basalExpected ?: 0.0,
+                    basalDrift,
+                    basalDrift - driftBefore
                 )
             )
         }
