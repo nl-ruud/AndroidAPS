@@ -210,6 +210,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     override var tempBasal: OmnipodDashPodStateManager.TempBasal?
         get() = podState.tempBasal
         set(tempBasal) {
+            updateBasalExpected(System.currentTimeMillis())
             podState.tempBasal = tempBasal
             rxBus.send(EventOmnipodDashPumpValuesChanged())
             store()
@@ -227,6 +228,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     override var basalProgram: BasalProgram?
         get() = podState.basalProgram
         set(basalProgram) {
+            updateBasalExpected(System.currentTimeMillis())
             podState.basalProgram = basalProgram
             rxBus.send(EventOmnipodDashPumpValuesChanged())
             store()
@@ -258,6 +260,23 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
     private val basalDrift: Double
         // Compute drift (actual - expected: positive = over-delivery, negative = under-delivery)
         get() = basalDelivered - (podState.basalExpected ?: basalDelivered)
+
+    private fun updateBasalExpected(currentTime: Long) {
+        // Update expected basal delivery up to currentTime
+        if (!isActivationCompleted) return
+
+        val lastUpdate = podState.lastUpdatedBasalExpected ?: podState.lastUpdatedSystem
+
+        podState.basalExpected?.let { currentExpected ->
+            integrateExpectedDelivery(lastUpdate, currentTime)?.let { delta ->
+                podState.basalExpected = currentExpected + delta
+                podState.lastUpdatedBasalExpected = currentTime
+            }
+        } ?: run {
+            podState.basalExpected = basalDelivered
+            podState.lastUpdatedBasalExpected = podState.lastUpdatedSystem ?: currentTime
+        }
+    }
 
     private fun integrateExpectedDelivery(startTime: Long, endTime: Long): Double? {
         logger.debug(LTag.PUMP, "integrateExpectedDelivery: period ${(endTime - startTime) / 1000.0}s")
@@ -680,11 +699,9 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         val nowRealtime = SystemClock.elapsedRealtime()
         val driftBefore = basalDrift.takeIf { isActivationCompleted } ?: 0.0
         
+        updateBasalExpected(now)
         podState.deliveryStatus = deliveryStatus
         podState.podStatus = podStatus
-        podState.basalExpected = podState.basalExpected?.let {
-            integrateExpectedDelivery(podState.lastUpdatedSystem, now)?.let { delta -> it + delta }
-        } ?: basalDelivered
         podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
             podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
                 (current + totalPulsesDelivered - prev).toShort()
@@ -902,6 +919,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         var lastBolus: OmnipodDashPodStateManager.LastBolus? = null,
 
         var bolusPulsesDelivered: Short? = null,  // Cumulative count of bolus pulses for basal tracking
-        var basalExpected: Double? = null  // Initialized to actual on first drift calculation
+        var basalExpected: Double? = null,  // Initialized to actual on first drift calculation
+        var lastUpdatedBasalExpected: Long? = null // Timestamp of last basal expected update
     ) : Serializable
 }
