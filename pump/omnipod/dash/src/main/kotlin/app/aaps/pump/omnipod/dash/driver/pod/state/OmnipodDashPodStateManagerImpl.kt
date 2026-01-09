@@ -724,6 +724,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
             updateLastBolusFromResponse(bolusPulsesRemaining)
         }
     }
+
     private inline fun logBasalTracking(block: () -> Unit) {
         val driftBefore = basalDrift.takeIf { isActivationCompleted } ?: 0.0
         block()
