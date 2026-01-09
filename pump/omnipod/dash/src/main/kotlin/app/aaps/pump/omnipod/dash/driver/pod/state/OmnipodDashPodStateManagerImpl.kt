@@ -676,33 +676,37 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         activeAlerts: EnumSet<AlertType>,
         bolusPulsesRemaining: Short
     ) {
-        val now = System.currentTimeMillis()
-        val nowRealtime = SystemClock.elapsedRealtime()
-        val driftBefore = basalDrift.takeIf { isActivationCompleted } ?: 0.0
-        
-        podState.deliveryStatus = deliveryStatus
-        podState.podStatus = podStatus
-        podState.basalExpected = podState.basalExpected?.let {
-            integrateExpectedDelivery(podState.lastUpdatedSystem, now)?.let { delta -> it + delta }
-        } ?: basalDelivered
-        podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
-            podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
-                (current + totalPulsesDelivered - prev).toShort()
-            } ?: current
-        } ?: totalPulsesDelivered.takeIf { isActivationCompleted }
-        podState.pulsesDelivered = totalPulsesDelivered
-        if (reservoirPulsesRemaining < 1023) {
-            podState.pulsesRemaining = reservoirPulsesRemaining
+        logBasalTracking {
+            val now = System.currentTimeMillis()
+            val nowRealtime = SystemClock.elapsedRealtime()
+
+            podState.basalExpected = podState.basalExpected?.let {
+                integrateExpectedDelivery(podState.lastUpdatedSystem, now)?.let { delta -> it + delta }
+            } ?: basalDelivered.takeIf { isActivationCompleted }
+            podState.deliveryStatus = deliveryStatus
+            podState.podStatus = podStatus
+            podState.bolusPulsesDelivered = podState.bolusPulsesDelivered?.let { current ->
+                podState.pulsesDelivered?.takeIf { podState.lastBolus?.deliveryComplete == false }?.let { prev ->
+                    (current + totalPulsesDelivered - prev).toShort()
+                } ?: current
+            } ?: totalPulsesDelivered.takeIf { isActivationCompleted }
+            podState.pulsesDelivered = totalPulsesDelivered
+            if (reservoirPulsesRemaining < 1023) {
+                podState.pulsesRemaining = reservoirPulsesRemaining
+            }
+            podState.sequenceNumberOfLastProgrammingCommand = sequenceNumberOfLastProgrammingCommand
+            podState.minutesSinceActivation = minutesSinceActivation
+            podState.activeAlerts = activeAlerts
+
+            podState.lastUpdatedSystem = now
+            podState.lastStatusResponseReceived = nowRealtime
+            updateLastBolusFromResponse(bolusPulsesRemaining)
         }
-        podState.sequenceNumberOfLastProgrammingCommand = sequenceNumberOfLastProgrammingCommand
-        podState.minutesSinceActivation = minutesSinceActivation
-        podState.activeAlerts = activeAlerts
+    }
 
-        podState.lastUpdatedSystem = now
-        podState.lastStatusResponseReceived = nowRealtime
-        updateLastBolusFromResponse(bolusPulsesRemaining)
-
-        // Log basal tracking information
+    private inline fun logBasalTracking(block: () -> Unit) {
+        val driftBefore = basalDrift.takeIf { isActivationCompleted } ?: 0.0
+        block()
         if (isActivationCompleted) {
             logger.info(
                 LTag.PUMP,
