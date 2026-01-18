@@ -764,7 +764,7 @@ class OmnipodDashPodStateManagerImpl @Inject constructor(
         if (isActivationCompleted) {
             logger.info(
                 LTag.PUMP,
-                "PUMP_BASAL act=%.2fU (tot=%.2fU bol=%.2fU) exp=%.2fU err=%+.2fU dErr=%+.2fU".format(
+                "PUMP_BASAL act=%.2fU (tot=%.2fU bol=%.2fU) exp=%.4fU err=%+.4fU dErr=%+.4fU".format(
                     basalDelivered,
                     (pulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS,
                     (bolusPulsesDelivered ?: 0) * PodConstants.POD_PULSE_BOLUS_UNITS,
